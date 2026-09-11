@@ -1,0 +1,47 @@
+name: Encrypt Page
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  encrypt:
+    runs-on: ubuntu-latest
+    container:
+      image: nikolaik/python-nodejs:python3.11-nodejs20-slim
+    permissions:
+      contents: write
+    steps:
+      - name: Install Git
+        run: |
+          apt-get clean && apt-get update -y
+          apt-get install -y git
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/checkout@v3
+      - name: Install staticrypt
+        run: npm install -g staticrypt@3.*
+      - name: Encrypt index
+        run: >
+          staticrypt main.html -p ${{ secrets.DECRYPTION_PASSPHRASE }} --short
+          --template "password_template.html"
+          --template-title "Email Archive"
+          --template-instructions "Enter password to access the Directors email archive."
+          --template-button "Unlock"
+          --template-color-primary "#3498db"
+          --template-color-secondary "#f9f9f9"
+      - name: Clean up
+        run: |
+          mv encrypted/main.html index.html
+          rm -r encrypted
+      - name: Commit files
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add .
+          git commit -m "encrypted files" || true
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: main
+          force: true
