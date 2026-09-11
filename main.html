@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Archive</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 40px 20px; background: #f9f9f9; }
+        h1 { color: #2c3e50; text-align: center; margin-bottom: 30px; }
+        .search-bar { position: sticky; top: 0; background: #f9f9f9; padding: 10px 0; z-index: 100; }
+        .search-bar input { width: 100%; padding: 15px 20px; border: 2px solid #ccc; border-radius: 8px; font-size: 18px; }
+        .search-bar input:focus { outline: none; border-color: #3498db; box-shadow: 0 0 10px rgba(52,152,219,0.3); }
+        .search-controls { display: flex; gap: 15px; margin-top: 10px; justify-content: center; }
+        .search-controls label { font-size: 13px; color: #555; cursor: pointer; }
+        .results { margin-top: 20px; }
+        .result-item { padding: 12px 15px; background: white; border: 1px solid #eee; border-radius: 4px; margin-bottom: 6px; cursor: pointer; }
+        .result-item:hover { border-color: #3498db; background: #f0f7ff; }
+        .result-item.hidden { display: none; }
+        .result-item a { color: #2c3e50; text-decoration: none; font-weight: bold; }
+        .result-item a:hover { color: #3498db; }
+        .result-meta { color: #888; font-size: 12px; margin-top: 4px; }
+        .stats { color: #999; font-size: 12px; text-align: center; margin-top: 20px; }
+        .email-view { display: none; }
+        .email-view.active { display: block; }
+        .email-header { margin-bottom: 15px; }
+        .email-header-details { margin-top: 8px; }
+        .email-header-details table { width: 100%; border-collapse: collapse; }
+        .email-header-details td { padding: 4px 8px; font-size: 13px; }
+        .email-header-details td:first-child { font-weight: bold; color: #888; width: 80px; }
+        .email-body { border-top: 1px solid #eee; padding-top: 10px; white-space: pre-wrap; font-size: 14px; }
+        .back-btn { background: none; border: 1px solid #ccc; padding: 6px 14px; border-radius: 4px; cursor: pointer; margin-bottom: 15px; font-size: 13px; }
+        .back-btn:hover { border-color: #3498db; color: #3498db; }
+        .attachment-link { color: #3498db; text-decoration: none; font-size: 13px; margin-right: 10px; }
+        .attachment-link:hover { text-decoration: underline; }
+        .toggle-section { cursor: pointer; user-select: none; color: #2c3e50; font-weight: bold; }
+        .toggle-section:hover { color: #3498db; }
+        .toggle-arrow { display: inline-block; transition: transform 0.2s; font-size: 11px; margin-right: 4px; }
+        .toggle-arrow.open { transform: rotate(90deg); }
+        .loading { text-align: center; color: #999; padding: 40px; }
+    </style>
+</head>
+<body>
+<h1>Email Archive</h1>
+
+<div id="searchView">
+<div class="search-bar">
+    <input type="text" id="searchInput" placeholder="Search emails..." autofocus autocomplete="off">
+    <div class="search-controls">
+        <label><input type="checkbox" id="searchSubject" checked> Subject</label>
+        <label><input type="checkbox" id="searchSender" checked> Sender</label>
+        <label><input type="checkbox" id="searchBody"> Body</label>
+        <label><input type="checkbox" id="searchAttachments"> Attachments</label>
+    </div>
+</div>
+<div class="stats" id="stats"><div class="loading">Loading emails...</div></div>
+<div class="results" id="results"></div>
+</div>
+
+<div id="emailView" class="email-view">
+    <button class="back-btn" onclick="showSearch()">&larr; Back to Search</button>
+    <div id="emailContent"></div>
+</div>
+
+<script>
+var emails = [];
+var resultsDiv = document.getElementById('results');
+var statsDiv = document.getElementById('stats');
+var searchInput = document.getElementById('searchInput');
+
+fetch('emails.json')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        emails = data;
+        statsDiv.textContent = emails.length + ' emails loaded. Type to search.';
+    })
+    .catch(function(e) {
+        statsDiv.textContent = 'Error loading emails: ' + e.message;
+    });
+
+function renderResults(list) {
+    resultsDiv.innerHTML = '';
+    for (var i = 0; i < list.length; i++) {
+        var e = list[i];
+        var div = document.createElement('div');
+        div.className = 'result-item';
+        div.onclick = (function(email) {
+            return function() { showEmail(email); };
+        })(e);
+        var date = '';
+        try {
+            var d = new Date(e.date);
+            if (!isNaN(d)) date = d.toISOString().slice(0, 10);
+        } catch(ex) {}
+        if (!date) date = (e.date || '').slice(0, 10);
+        var attach = '';
+        if (e.attachments && e.attachments.length > 0) {
+            attach = ' &mdash; [' + e.attachments.length + ' attachment' + (e.attachments.length > 1 ? 's' : '') + ']';
+        }
+        div.innerHTML = '<a href="#">' + escHtml(e.subject) + '</a>' +
+            '<div class="result-meta">' + escHtml(date) + ' &mdash; ' + escHtml(e.sender) + attach + '</div>';
+        resultsDiv.appendChild(div);
+    }
+}
+
+function doSearch() {
+    var q = searchInput.value.toLowerCase().trim();
+    if (!q) {
+        resultsDiv.innerHTML = '';
+        statsDiv.textContent = emails.length + ' emails loaded. Type to search.';
+        return;
+    }
+    var opts = {
+        subject: document.getElementById('searchSubject').checked,
+        sender: document.getElementById('searchSender').checked,
+        body: document.getElementById('searchBody').checked,
+        attachments: document.getElementById('searchAttachments').checked
+    };
+    var matched = [];
+    for (var i = 0; i < emails.length; i++) {
+        var e = emails[i];
+        var match = false;
+        if (opts.subject && e.subject && e.subject.toLowerCase().indexOf(q) !== -1) match = true;
+        if (opts.sender && e.sender && e.sender.toLowerCase().indexOf(q) !== -1) match = true;
+        if (opts.body && e.body && e.body.toLowerCase().indexOf(q) !== -1) match = true;
+        if (opts.attachments && e.attachments) {
+            for (var j = 0; j < e.attachments.length; j++) {
+                if (e.attachments[j].name.toLowerCase().indexOf(q) !== -1) { match = true; break; }
+            }
+        }
+        if (match) matched.push(e);
+    }
+    renderResults(matched);
+    statsDiv.textContent = matched.length + ' of ' + emails.length + ' emails match';
+}
+
+searchInput.addEventListener('input', doSearch);
+document.querySelectorAll('.search-controls input').forEach(function(cb) {
+    cb.addEventListener('change', doSearch);
+});
+
+function showEmail(e) {
+    document.getElementById('searchView').style.display = 'none';
+    var view = document.getElementById('emailView');
+    view.className = 'email-view active';
+    var date = '';
+    try {
+        var d = new Date(e.date);
+        if (!isNaN(d)) date = d.toISOString().slice(0, 16).replace('T', ' ');
+    } catch(ex) {}
+    if (!date) date = e.date || '';
+
+    var html = '<div class="email-header">';
+    html += '<span class="toggle-section" onclick="toggleHeader(this)"><span class="toggle-arrow">&#9656;</span> ' + escHtml(e.subject) + '</span>';
+    html += '<div class="email-header-details" style="display:none">';
+    html += '<table>';
+    html += '<tr><td>From</td><td>' + escHtml(e.sender) + '</td></tr>';
+    html += '<tr><td>Subject</td><td>' + escHtml(e.subject) + '</td></tr>';
+    html += '<tr><td>Date</td><td>' + escHtml(date) + '</td></tr>';
+    html += '<tr><td>File</td><td>' + escHtml(e.eml) + '</td></tr>';
+    if (e.attachments && e.attachments.length > 0) {
+        html += '<tr><td>Attachments</td><td>';
+        for (var i = 0; i < e.attachments.length; i++) {
+            html += '<a href="attachments/' + escHtml(e.attachments[i].name) + '" class="attachment-link" target="_blank">' + escHtml(e.attachments[i].name) + '</a>';
+        }
+        html += '</td></tr>';
+    }
+    html += '</table></div></div>';
+    html += '<div class="email-body">' + sanitizeBody(e.body) + '</div>';
+    document.getElementById('emailContent').innerHTML = html;
+    window.scrollTo(0, 0);
+}
+
+function showSearch() {
+    document.getElementById('emailView').className = 'email-view';
+    document.getElementById('searchView').style.display = 'block';
+}
+
+function escHtml(s) {
+    if (!s) return '';
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function sanitizeBody(body) {
+    if (!body) return '';
+    var allowed = 'b|i|u|strong|em|p|br|div|span|table|tr|td|th|thead|tbody|ul|ol|li|h[1-6]|font|a|img|hr|blockquote|pre|code';
+    var tagRe = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>/g;
+    var result = '';
+    var last = 0;
+    var m;
+    while ((m = tagRe.exec(body)) !== null) {
+        result += escHtml(body.substring(last, m.index));
+        var close = m[1] === '/';
+        var tag = m[2].toLowerCase();
+        var attrs = m[3];
+        if (new RegExp('^(' + allowed + ')$').test(tag)) {
+            if (close) {
+                result += '</' + tag + '>';
+            } else if (tag === 'br' || tag === 'hr' || tag === 'img') {
+                result += '<' + tag + attrs + '>';
+            } else {
+                result += '<' + tag + '>';
+            }
+        } else {
+            result += '';
+        }
+        last = tagRe.lastIndex;
+    }
+    result += escHtml(body.substring(last));
+    result = result.replace(/\n\n+/g, '</p><p>');
+    result = result.replace(/\n/g, '<br>');
+    result = '<p>' + result + '</p>';
+    return result;
+}
+
+function toggleHeader(el) {
+    var details = el.nextElementSibling;
+    var arrow = el.querySelector('.toggle-arrow');
+    if (details.style.display === 'none') {
+        details.style.display = 'block';
+        arrow.className = 'toggle-arrow open';
+    } else {
+        details.style.display = 'none';
+        arrow.className = 'toggle-arrow';
+    }
+}
+</script>
+</body>
+</html>
