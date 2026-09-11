@@ -1,0 +1,4 @@
+exclude:
+  - main.html
+  - password_template.html
+  - .github/
